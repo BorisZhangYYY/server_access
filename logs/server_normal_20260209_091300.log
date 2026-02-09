@@ -1,5 +1,0 @@
-Code-server 已启动
-正在建立 SSH 隧道...
-访问地址：http://127.0.0.1:1143
-隧道PID: 11915 (已保存到 tunnel.pid)
-使用 './stop_tunnel.sh' 停止隧道
