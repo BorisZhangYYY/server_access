@@ -1,16 +1,16 @@
 import json
 import os
-import subprocess
-import time
 import signal
+import subprocess
+import sys
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 
-class ServerManager:
-    """Manages remote code-server connections."""
+class TunnelManager:
+    """Build remote SSH tunnels to local ports."""
 
     def __init__(self, config_path: str = "config.json"):
-        """Initializes the ServerManager.
+        """Initializes the TunnelManager.
 
         Args:
             config_path: Path to the configuration file.
@@ -30,7 +30,7 @@ class ServerManager:
 
     def _get_server_config(self, alias: str) -> Optional[Dict[str, Any]]:
         """Retrieves configuration for a specific server alias."""
-        for server in self.config.get("servers", []):
+        for server in self.config.get("tunnels", []):
             if server["alias"] == alias:
                 return server
         return None
@@ -38,92 +38,68 @@ class ServerManager:
     def _get_pid_file(self, alias: str) -> Path:
         """Returns the PID file path for a given server alias."""
         return self.logs_dir / f"{alias}.pid"
-
+    
     def _get_ssh_base_cmd(self, server: Dict[str, Any]) -> List[str]:
         """Constructs the base SSH command with jump host if configured."""
         cmd = ["ssh"]
-        if server.get("jump_host"):
-            cmd.extend(["-J", server["jump_host"]])
+        jump_host = server.get("jump_host", "")
+        if jump_host:
+            user_host, port = jump_host.rsplit(":", 1)
+            cmd.extend(["-p", port, user_host])
         return cmd
-
+    
     def connect(self, alias: str) -> None:
-        """Connects to a server: starts remote process and establishes local tunnel.
+        """Build a tunnel to a remote server.
 
         Args:
-            alias: The alias of the server to connect to.
+            alias: The alias of the tunnel to connect to.
         """
         server = self._get_server_config(alias)
         if not server:
-            print(f"Error: Server '{alias}' not found in config.")
+            print(f"Error: Tunnel config '{alias}' not found.")
             return
-
+        
         print(f"Starting connection to '{alias}' ({server['host']})...")
 
         # 1. Kill existing local tunnel for this specific configuration
         self.stop(alias)
 
-        # 2. Start remote code-server
-        print("Starting remote code-server...")
+        # 2. Construct the SSH command, example:
+        # ssh -p 58422 liujiahao@jumper-huabei2-vpc.datagrand.com -N -f -L 23306:172.17.20.21:23306 -o TCPKeepAlive=yes
+        ssh_cmd = self._get_ssh_base_cmd(server) + [
+            "-N",  # No remote command (just forward ports)
+            # "-f",  # Run in background
+            "-L", f"{server['local_port']}:{server['host']}:{server['remote_port']}",
+        ] + server['tunnel_config'].split()
         
-        # Construct a script to be executed on the remote server
-        # We use a script passed via stdin to ensure better handling of background processes
-        remote_script = (
-            f"cd {server['remote_work_dir']}\n"
-            f"pkill -f 'code-server.*{server['remote_port']}' || true\n"
-            f"{server['start_cmd']}\n"
-            "sleep 2\n" # Give nohup time to detach
-            "echo 'Remote initialization commands executed.'\n"
-        )
-        
-        ssh_cmd = self._get_ssh_base_cmd(server) + [f"{server['user']}@{server['host']}"]
+        print(f"Establishing SSH tunnel on port {server['local_port']}...")
 
+        # 3. Start the tunnel process
+        # We use subprocess.Popen to start it in the background.
+        log_file = self.logs_dir / f"{alias}_tunnel.log"
+        
         try:
-            # Use Popen to pipe the script to stdin, mimicking 'ssh user@host << EOF'
-            process = subprocess.Popen(
-                ssh_cmd, 
-                stdin=subprocess.PIPE, 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            stdout, stderr = process.communicate(input=remote_script)
+            with open(log_file, "w") as log:
+                # preexec_fn=os.setsid makes the process a new session leader.
+                # This ensures it doesn't get killed when the python script exits (if running interactively)
+                # and allows it to run as a daemon-like process.
+                process = subprocess.Popen(
+                    ssh_cmd,
+                    stdout=log,
+                    stderr=log,
+                    preexec_fn=os.setsid 
+                )
             
-            if process.returncode != 0:
-                print(f"Error executing remote commands. Exit code: {process.returncode}")
-                print(f"Stderr: {stderr}")
-                return
+            # Save PID so we can stop it later
+            pid_file = self._get_pid_file(alias)
+            with open(pid_file, "w") as f:
+                f.write(str(process.pid))
             
-            print("Remote code-server started (or attempted). Output:")
-            print(stdout)
+            print(f"Tunnel established (PID: {process.pid}).")
             
         except Exception as e:
-            print(f"Error starting remote server: {e}")
+            print(f"Error starting tunnel: {e}")
             return
-
-        # 3. Establish SSH Tunnel
-        print(f"Establishing SSH tunnel on port {server['local_port']}...")
-        tunnel_cmd = self._get_ssh_base_cmd(server) + [
-            "-N",  # Do not execute a remote command
-            "-L", f"{server['local_port']}:127.0.0.1:{server['remote_port']}",
-            f"{server['user']}@{server['host']}"
-        ]
-
-        log_file = self.logs_dir / f"{alias}_tunnel.log"
-        with open(log_file, "w") as log:
-            process = subprocess.Popen(
-                tunnel_cmd,
-                stdout=log,
-                stderr=log,
-                preexec_fn=os.setsid # Create new process group
-            )
-        
-        # Save PID
-        pid_file = self._get_pid_file(alias)
-        with open(pid_file, "w") as f:
-            f.write(str(process.pid))
-        
-        print(f"Tunnel established (PID: {process.pid}).")
-        print(f"Access URL: http://127.0.0.1:{server['local_port']}")
 
     def stop(self, alias: str) -> None:
         """Stops the SSH tunnel for a given server.
@@ -148,19 +124,18 @@ class ServerManager:
                 print(f"Error stopping '{alias}': {e}")
         else:
             print(f"No active tunnel found for '{alias}'.")
-
+        
     def status(self) -> None:
-        """Prints the status of all configured servers."""
-        print("\n=== Server Status ===")
-        print(f"{'Alias':<10} | {'Status':<10} | {'PID':<8} | {'URL'}")
+        """Prints the status of all configured tunnels."""
+        print("\n=== Tunnel Status ===")
+        print(f"{'Alias':<10} | {'Status':<10} | {'PID':<8}")
         print("-" * 60)
 
-        for server in self.config.get("servers", []):
+        for server in self.config.get("tunnels", []):
             alias = server["alias"]
             pid_file = self._get_pid_file(alias)
             status = "Stopped"
             pid_str = "-"
-            url = "-"
 
             if pid_file.exists():
                 try:
@@ -171,16 +146,15 @@ class ServerManager:
                         os.kill(pid, 0) # Signal 0 checks existence
                         status = "Running"
                         pid_str = str(pid)
-                        url = f"http://127.0.0.1:{server['local_port']}"
                     except ProcessLookupError:
                         status = "Dead"
                         # Clean up dead PID file? Maybe not in status check, or yes.
                 except ValueError:
                     status = "Error"
 
-            print(f"{alias:<10} | {status:<10} | {pid_str:<8} | {url}")
+            print(f"{alias:<10} | {status:<10} | {pid_str:<8}")
         print("\n")
-
-    def list_servers(self) -> List[str]:
-        """Returns a list of server aliases."""
-        return [s["alias"] for s in self.config.get("servers", [])]
+        
+    def list_tunnels(self) -> list[str]:
+        """Returns a list of tunnel aliases."""
+        return [s["alias"] for s in self.config.get("tunnels", [])]
