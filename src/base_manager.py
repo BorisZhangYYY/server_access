@@ -19,6 +19,7 @@ class BaseManager:
 
         self.config = self._load_config()
         self.cleanup_orphan_files()
+        self.cleanup_dead_pids()
 
     def _load_config(self) -> Dict[str, Any]:
         if not self.config_path.exists():
@@ -77,6 +78,9 @@ class BaseManager:
         return [item["alias"] for item in self.config.get(self.config_key, [])]
 
     def cleanup_orphan_files(self, dry_run: bool = False) -> None:
+        '''
+        if pid/log file exists but the config is gone, then remove the pid/log file.
+        '''
         valid_aliases = set(self.get_aliases())
         to_check = [
             (self.logs_dir.glob(f"*_{self.pid_tag}.pid"), f"_{self.pid_tag}.pid"),
@@ -102,6 +106,13 @@ class BaseManager:
                         print(f"[DRY-RUN] Would remove legacy orphan file: {file.name}")
                     else:
                         file.unlink(missing_ok=True)
+
+    def cleanup_dead_pids(self) -> None:
+        '''
+        if process is dead but pid file exists, then remove the pid file.
+        '''
+        for alias in self.get_aliases():
+            self.pid_status(alias)
 
     def pid_status(self, alias: str) -> Tuple[str, str]:
         pid = self._read_pid(alias)
