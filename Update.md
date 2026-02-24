@@ -7,7 +7,9 @@
     3. test the new function "Build Tunnel" and make sure it works.
     4. other changes to make differences to ServerManager and TunnelManager, such as the logs' name and other text messages.
 
-- TODO IN FUTURE:
-    1. folder logs have some old files, need to clean them. and need to add some logic, if the server config is gone or the tunnel config is gone, then the log file should be deleted.
-    2. i think the two managers have many duplicated code, mabbe in the future we can reafctor them into a base class, such as BaseManager, and let ServerManager and TunnelManager inherit from it.
-    3. i think that the log file is no use because there are not logics to write logs to it, so maybe we can remove it or add some logics to write logs to it.
+- 2026.02.22
+    use ChatGPT-Codex to make a pull request for the project, the changes are listed as follows:
+    1. add BaseManager to consolidate shared config/pid/log helpers, then let ServerManager and TunnelManager inherit from it.
+    2. standardize pid/log filenames with tags (e.g. _server, _tunnel) and migrate legacy *.pid when detected.
+    3. add cleanup of orphan pid/log files at startup when configs are removed (supports dry-run).
+    4. unify status/pid checks via BaseManager.pid_status and list aliases via BaseManager.
