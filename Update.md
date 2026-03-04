@@ -13,3 +13,10 @@
     2. standardize pid/log filenames with tags (e.g. _server, _tunnel) and migrate legacy *.pid when detected.
     3. add cleanup of orphan pid/log files at startup when configs are removed (supports dry-run).
     4. unify status/pid checks via BaseManager.pid_status and list aliases via BaseManager.
+
+- 2026.03.04
+    1. i found that the log files of the system is always empty, so i decide to delete the function of writting log files.
+    2. add new parameters in /config.json for tunnel timeout detection and keep-alive mechanism.
+
+- TODO List:
+    None for now.

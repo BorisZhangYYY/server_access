@@ -1,6 +1,7 @@
 import os
 import signal
 import subprocess
+import time
 from typing import Any, Dict, List, Optional
 
 from base_manager import BaseManager
@@ -9,14 +10,34 @@ from base_manager import BaseManager
 class ServerManager(BaseManager):
     """Manages remote code-server connections."""
 
+    CONNECT_TIMEOUT_SECONDS = 15
+    STARTUP_CHECK_SECONDS = 2
+    SERVER_ALIVE_INTERVAL = 15
+    SERVER_ALIVE_COUNT_MAX = 2
+
     def __init__(self, config_path: str = "config.json"):
-        super().__init__(config_path=config_path, config_key="servers", pid_tag="server", log_tag="server")
+        super().__init__(config_path=config_path, config_key="servers", pid_tag="server")
+        timeouts = self.config.get("timeouts", {})
+        self.CONNECT_TIMEOUT_SECONDS = int(timeouts.get("connect_seconds", self.CONNECT_TIMEOUT_SECONDS))
+        self.STARTUP_CHECK_SECONDS = int(timeouts.get("startup_check_seconds", self.STARTUP_CHECK_SECONDS))
+        self.SERVER_ALIVE_INTERVAL = int(timeouts.get("server_alive_interval", self.SERVER_ALIVE_INTERVAL))
+        self.SERVER_ALIVE_COUNT_MAX = int(timeouts.get("server_alive_count_max", self.SERVER_ALIVE_COUNT_MAX))
 
     def _get_server_config(self, alias: str) -> Optional[Dict[str, Any]]:
         return self._get_item_config(alias)
 
     def _get_ssh_base_cmd(self, server: Dict[str, Any]) -> List[str]:
-        cmd = ["ssh"]
+        cmd = [
+            "ssh",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            f"ConnectTimeout={self.CONNECT_TIMEOUT_SECONDS}",
+            "-o",
+            f"ServerAliveInterval={self.SERVER_ALIVE_INTERVAL}",
+            "-o",
+            f"ServerAliveCountMax={self.SERVER_ALIVE_COUNT_MAX}",
+        ]
         if server.get("jump_host"):
             cmd.extend(["-J", server["jump_host"]])
         return cmd
@@ -42,22 +63,23 @@ class ServerManager(BaseManager):
         ssh_cmd = self._get_ssh_base_cmd(server) + [f"{server['user']}@{server['host']}"]
 
         try:
-            process = subprocess.Popen(
+            result = subprocess.run(
                 ssh_cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                input=remote_script,
+                capture_output=True,
                 text=True,
+                timeout=self.CONNECT_TIMEOUT_SECONDS,
+                check=False,
             )
-            stdout, stderr = process.communicate(input=remote_script)
-
-            if process.returncode != 0:
-                print(f"Error executing remote commands. Exit code: {process.returncode}")
-                print(f"Stderr: {stderr}")
+            if result.returncode != 0:
+                print(f"Error executing remote commands. Exit code: {result.returncode}")
+                print(f"Stderr: {result.stderr}")
                 return
-
             print("Remote code-server started (or attempted). Output:")
-            print(stdout)
+            print(result.stdout)
+        except subprocess.TimeoutExpired:
+            print(f"Error: remote initialization timed out after {self.CONNECT_TIMEOUT_SECONDS}s.")
+            return
         except Exception as e:
             print(f"Error starting remote server: {e}")
             return
@@ -65,19 +87,23 @@ class ServerManager(BaseManager):
         print(f"Establishing SSH tunnel on port {server['local_port']}...")
         tunnel_cmd = self._get_ssh_base_cmd(server) + [
             "-N",
+            "-o",
+            "ExitOnForwardFailure=yes",
             "-L",
             f"{server['local_port']}:127.0.0.1:{server['remote_port']}",
             f"{server['user']}@{server['host']}",
         ]
 
-        log_file = self._get_log_file(alias)
-        with open(log_file, "w", encoding="utf-8") as log:
-            process = subprocess.Popen(
-                tunnel_cmd,
-                stdout=log,
-                stderr=log,
-                preexec_fn=os.setsid,
-            )
+        process = subprocess.Popen(
+            tunnel_cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            preexec_fn=os.setsid,
+        )
+        time.sleep(self.STARTUP_CHECK_SECONDS)
+        if process.poll() is not None:
+            print(f"Error: failed to establish tunnel for '{alias}'.")
+            return
 
         self._write_pid(alias, process.pid)
 

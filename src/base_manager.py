@@ -7,15 +7,14 @@ from typing import Any, Dict, List, Optional, Tuple
 class BaseManager:
     """Shared helpers for process/config based managers."""
 
-    def __init__(self, config_path: str, config_key: str, pid_tag: str, log_tag: str):
+    def __init__(self, config_path: str, config_key: str, pid_tag: str):
         self.project_root = Path(__file__).parent.parent
         self.config_path = self.project_root / config_path
-        self.logs_dir = self.project_root / "logs"
-        self.logs_dir.mkdir(exist_ok=True)
+        self.pids_dir = self.project_root / "pids"
+        self.pids_dir.mkdir(exist_ok=True)
 
         self.config_key = config_key
         self.pid_tag = pid_tag
-        self.log_tag = log_tag
 
         self.config = self._load_config()
         self.cleanup_orphan_files()
@@ -34,13 +33,10 @@ class BaseManager:
         return None
 
     def _get_pid_file(self, alias: str) -> Path:
-        return self.logs_dir / f"{alias}_{self.pid_tag}.pid"
-
-    def _get_log_file(self, alias: str) -> Path:
-        return self.logs_dir / f"{alias}_{self.log_tag}.log"
+        return self.pids_dir / f"{alias}_{self.pid_tag}.pid"
 
     def _legacy_pid_file(self, alias: str) -> Path:
-        return self.logs_dir / f"{alias}.pid"
+        return self.pids_dir / f"{alias}.pid"
 
     def _read_pid(self, alias: str) -> Optional[int]:
         pid_file = self._get_pid_file(alias)
@@ -79,25 +75,20 @@ class BaseManager:
 
     def cleanup_orphan_files(self, dry_run: bool = False) -> None:
         '''
-        if pid/log file exists but the config is gone, then remove the pid/log file.
+        if pid file exists but the config is gone, then remove the pid file.
         '''
         valid_aliases = set(self.get_aliases())
-        to_check = [
-            (self.logs_dir.glob(f"*_{self.pid_tag}.pid"), f"_{self.pid_tag}.pid"),
-            (self.logs_dir.glob(f"*_{self.log_tag}.log"), f"_{self.log_tag}.log"),
-        ]
-
-        for file_iter, suffix in to_check:
-            for file in file_iter:
-                alias = file.name[: -len(suffix)]
-                if alias not in valid_aliases:
-                    if dry_run:
-                        print(f"[DRY-RUN] Would remove orphan file: {file.name}")
-                    else:
-                        file.unlink(missing_ok=True)
+        suffix = f"_{self.pid_tag}.pid"
+        for file in self.pids_dir.glob(f"*{suffix}"):
+            alias = file.name[: -len(suffix)]
+            if alias not in valid_aliases:
+                if dry_run:
+                    print(f"[DRY-RUN] Would remove orphan file: {file.name}")
+                else:
+                    file.unlink(missing_ok=True)
 
         if self.pid_tag == "server":
-            for file in self.logs_dir.glob("*.pid"):
+            for file in self.pids_dir.glob("*.pid"):
                 if file.name.endswith("_server.pid") or file.name.endswith("_tunnel.pid"):
                     continue
                 alias = file.stem
