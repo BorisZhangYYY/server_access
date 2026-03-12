@@ -116,7 +116,19 @@ class ServerManager(BaseManager):
             print(f"No active tunnel found for '{alias}'.")
             return
 
+        server = self._get_server_config(alias)
+        required_tokens = ["ssh"]
+        if server and server.get("local_port") is not None:
+            required_tokens.append(f"-L {server['local_port']}:")
+        required_tokens.append("ExitOnForwardFailure=yes")
+
         try:
+            if not self._pid_matches_expected_command(pid, required_tokens):
+                print(
+                    f"PID {pid} for '{alias}' does not look like a tunnel process. "
+                    "Cleaning up PID file without killing."
+                )
+                return
             os.kill(pid, signal.SIGTERM)
             print(f"Stopped tunnel for '{alias}' (PID: {pid}).")
         except ProcessLookupError:

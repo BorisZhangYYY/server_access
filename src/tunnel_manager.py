@@ -44,6 +44,18 @@ class TunnelManager(BaseManager):
         return cmd
 
     def connect(self, alias: str) -> None:
+        """Create an SSH local port forward tunnel.
+
+        Args:
+            alias: Tunnel alias in config.
+
+        The connection is attempted in two phases:
+        1) Forward to the tunnel's configured host (legacy behavior).
+        2) Forward to 127.0.0.1 on the remote (common for services bound locally).
+
+        If both attempts fail, the user will be guided to register SSH host config
+        via the provided server tools script.
+        """
         server = self._get_server_config(alias)
         if not server:
             print(f"Error: Tunnel config '{alias}' not found.")
@@ -52,31 +64,61 @@ class TunnelManager(BaseManager):
         print(f"Starting connection to '{alias}' ({server['host']})...")
         self.stop(alias)
 
-        ssh_cmd = self._get_ssh_base_cmd(server) + [
-            "-N",
-            "-o",
-            "ExitOnForwardFailure=yes",
-            "-L",
-            f"{server['local_port']}:{server['host']}:{server['remote_port']}",
-        ] + server["tunnel_config"].split()
+        dest_user = server.get("user")
+        dest = f"{dest_user}@{server['host']}" if dest_user else f"{server['host']}"
+        tunnel_config_tokens = str(server.get("tunnel_config", "")).split()
 
-        print(f"Establishing SSH tunnel on port {server['local_port']}...")
+        remote_hosts_to_try = [str(server["host"]), "127.0.0.1"]
+        last_stderr = ""
 
-        try:
-            process = subprocess.Popen(
-                ssh_cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                preexec_fn=os.setsid,
+        for index, remote_bind_host in enumerate(remote_hosts_to_try, start=1):
+            ssh_cmd = self._get_ssh_base_cmd(server) + [
+                "-N",
+                "-o",
+                "ExitOnForwardFailure=yes",
+                "-L",
+                f"{server['local_port']}:{remote_bind_host}:{server['remote_port']}",
+            ] + tunnel_config_tokens + [dest]
+
+            mode = "remote-host" if index == 1 else "remote-127.0.0.1"
+            print(
+                f"Establishing SSH tunnel on port {server['local_port']} "
+                f"(mode: {mode})..."
             )
-            time.sleep(self.STARTUP_CHECK_SECONDS)
-            if process.poll() is not None:
-                print(f"Error: failed to establish tunnel for '{alias}'.")
+
+            try:
+                process = subprocess.Popen(
+                    ssh_cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    preexec_fn=os.setsid,
+                )
+                time.sleep(self.STARTUP_CHECK_SECONDS)
+                if process.poll() is not None:
+                    stderr_text = ""
+                    if process.stderr is not None:
+                        stderr_text = (process.stderr.read() or "").strip()
+                    if stderr_text:
+                        last_stderr = stderr_text
+                        print(stderr_text)
+                    continue
+
+                self._write_pid(alias, process.pid)
+                print(f"Tunnel established (PID: {process.pid}).")
                 return
-            self._write_pid(alias, process.pid)
-            print(f"Tunnel established (PID: {process.pid}).")
-        except Exception as e:
-            print(f"Error starting tunnel: {e}")
+            except Exception as e:
+                last_stderr = str(e)
+                continue
+
+        print(f"Error: failed to establish tunnel for '{alias}'.")
+        if last_stderr:
+            print(last_stderr)
+        script_path = str(self.project_root / "tools" / "register_ssh_hosts.py")
+        print(
+            "Hint: If you rely on ~/.ssh/config (e.g. correct User/ProxyJump), "
+            f"run:\n  python3 {script_path}"
+        )
 
     def stop(self, alias: str) -> None:
         pid = self._read_pid(alias)
@@ -84,7 +126,19 @@ class TunnelManager(BaseManager):
             print(f"No active tunnel found for '{alias}'.")
             return
 
+        server = self._get_server_config(alias)
+        required_tokens = ["ssh"]
+        if server and server.get("local_port") is not None:
+            required_tokens.append(f"-L {server['local_port']}:")
+        required_tokens.append("ExitOnForwardFailure=yes")
+
         try:
+            if not self._pid_matches_expected_command(pid, required_tokens):
+                print(
+                    f"PID {pid} for '{alias}' does not look like a tunnel process. "
+                    "Cleaning up PID file without killing."
+                )
+                return
             os.kill(pid, signal.SIGTERM)
             print(f"Stopped tunnel for '{alias}' (PID: {pid}).")
         except ProcessLookupError:

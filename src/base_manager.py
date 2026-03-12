@@ -1,7 +1,8 @@
 import json
 import os
+import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 
 class BaseManager:
@@ -69,6 +70,46 @@ class BaseManager:
             return True
         except ProcessLookupError:
             return False
+
+    def _get_process_command(self, pid: int) -> Optional[str]:
+        """Get a process command line by pid.
+
+        Args:
+            pid: Process id.
+
+        Returns:
+            Command line string if available; otherwise None.
+        """
+        try:
+            result = subprocess.run(
+                ["ps", "-p", str(pid), "-o", "command="],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=2,
+            )
+        except Exception:
+            return None
+
+        if result.returncode != 0:
+            return None
+        cmd = (result.stdout or "").strip()
+        return cmd or None
+
+    def _pid_matches_expected_command(self, pid: int, required_substrings: Sequence[str]) -> bool:
+        """Check whether the pid's command line contains all required substrings.
+
+        Args:
+            pid: Process id.
+            required_substrings: Substrings expected to appear in the command line.
+
+        Returns:
+            True if all substrings match; otherwise False.
+        """
+        cmd = self._get_process_command(pid)
+        if not cmd:
+            return False
+        return all(token in cmd for token in required_substrings)
 
     def get_aliases(self) -> List[str]:
         return [item["alias"] for item in self.config.get(self.config_key, [])]
