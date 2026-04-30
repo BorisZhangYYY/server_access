@@ -1,0 +1,57 @@
+{
+    "servers": [
+        {
+            "alias": "my-server",
+            "host": "192.168.1.100",
+            "user": "ubuntu",
+            "local_port": 1143,
+            "remote_port": 1143,
+            "jump_host": "",
+            "remote_work_dir": "~/code-server/",
+            "start_cmd": "nohup ./bin/code-server --bind-addr 127.0.0.1:1143 --auth none > /dev/null 2>&1 &"
+        },
+        {
+            "alias": "jump-server",
+            "host": "10.0.0.50",
+            "user": "admin",
+            "local_port": 1144,
+            "remote_port": 1144,
+            "jump_host": "user@bastion.example.com:22",
+            "remote_work_dir": "~/code-server/",
+            "start_cmd": "nohup ./bin/code-server --bind-addr 127.0.0.1:1144 --auth none > /dev/null 2>&1 &"
+        }
+    ],
+    "tunnels": [
+        {
+            "alias": "mysql",
+            "host": "10.0.0.10",
+            "local_port": 23306,
+            "remote_port": 23306,
+            "jump_host": "user@bastion.example.com:22",
+            "tunnel_config": "-o TCPKeepAlive=yes"
+        },
+        {
+            "alias": "redis",
+            "host": "10.0.0.10",
+            "local_port": 16379,
+            "remote_port": 16379,
+            "jump_host": "user@bastion.example.com:22",
+            "tunnel_config": "-o TCPKeepAlive=yes"
+        },
+        {
+            "alias": "custom-service",
+            "host": "192.168.1.100",
+            "user": "root",
+            "local_port": 28080,
+            "remote_port": 28080,
+            "jump_host": "",
+            "tunnel_config": "-o TCPKeepAlive=yes"
+        }
+    ],
+    "timeouts": {
+        "connect_seconds": 15,
+        "startup_check_seconds": 5,
+        "server_alive_interval": 30,
+        "server_alive_count_max": 5
+    }
+}
