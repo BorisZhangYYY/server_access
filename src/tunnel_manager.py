@@ -65,6 +65,12 @@ class TunnelManager(BaseManager):
         self.stop(alias)
 
         dest_user = server.get("user")
+        jump_host = server.get("jump_host", "")
+        # 如果有 user，使用 user@host；否则如果有 jump_host，直接用 host（跳板机认证）
+        # 既没有 user 也没有 jump_host，报错退出
+        if not dest_user and not jump_host:
+            print(f"Error: Tunnel '{alias}' has no user and no jump_host configured. Cannot establish connection.")
+            return
         dest = f"{dest_user}@{server['host']}" if dest_user else f"{server['host']}"
         tunnel_config_tokens = str(server.get("tunnel_config", "")).split()
 
