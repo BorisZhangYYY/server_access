@@ -1,10 +1,24 @@
-# Server Manager
+# Server Access
 
 远程服务器管理工具，通过 SSH 隧道连接远程 Code Server 或搭建端口转发。
 
+## 安装部署
+
+```bash
+# 克隆项目
+git clone https://github.com/BorisZhangYYY/server_access.git
+cd server_access
+
+# 复制配置示例
+cp config.json.example config.json
+
+# 编辑配置，添加你的服务器信息
+vim config.json
+```
+
 ## 配置说明
 
-配置文件：`config.json`（参考 `config.json.example`）
+配置文件：`config.json`
 
 ```json
 {
@@ -119,3 +133,24 @@ python3 tools/register_ssh_hosts.py --host <specific_host>  # 只注册特定主
 - `config.json` 包含敏感信息，不应提交到代码仓库
 - PID 文件存储在 `pids/` 目录
 - 连接超时、存活检测等参数可在 `timeouts` 配置节中调整
+
+## 使用场景
+
+### 场景 1：连接到远程 Code Server
+
+1. 配置 `config.json` 中的服务器信息
+2. 运行 `python3 src/main.py connect <server_alias>`
+3. 浏览器访问 `http://localhost:1143`
+
+### 场景 2：建立数据库隧道
+
+1. 配置 `config.json` 中的隧道信息
+2. 运行 `python3 src/main.py tunnel <tunnel_alias>`
+3. 本地访问 `localhost:23306` 即可连接远程数据库
+
+### 场景 3：通过跳板机连接
+
+在 `jump_host` 字段指定跳板机地址，例如：
+```json
+"jump_host": "user@bastion.example.com:22"
+```
