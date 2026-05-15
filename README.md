@@ -6,7 +6,7 @@
 
 ### 1. 远程 Code Server 管理
 
-- 一键启动远程服务器的 [code-server](https://github.com/coder/code-server)
+- 一键启动远程服务器的 code-server
 - 支持通过跳板机（Jump Host）连接
 - 本地访问远程 Code Server：`http://127.0.0.1:<端口>`
 
