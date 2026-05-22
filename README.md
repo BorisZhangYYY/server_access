@@ -4,7 +4,7 @@
 
 ## 功能
 
-- **Code Server 管理**：SSH 到远程主机启动 code-server，自动建立本地隧道，浏览器访问 `http://127.0.0.1:<端口>`
+- **Code Server 管理**：SSH 到远程主机启动 code-server，建立本地隧道，浏览器访问 `http://127.0.0.1:<端口>`
 - **SSH 隧道管理**：独立的端口转发（Local Port Forwarding），支持跳板机、TCPKeepAlive 保活
 - **SSH Host 注册**：自动生成 `~/.ssh/config` 条目
 
@@ -106,28 +106,9 @@ python3 src/main.py stop <alias>
 python3 tools/register_ssh_hosts.py
 ```
 
-## 项目结构
-
-```
-.
-├── server.sh              # 入口脚本
-├── config.json            # 主配置（gitignore）
-├── config.json.example    # 配置示例
-├── src/
-│   ├── main.py            # CLI 入口
-│   ├── base_manager.py    # 基础管理类
-│   ├── server_manager.py  # Code Server 管理
-│   └── tunnel_manager.py  # 隧道管理
-└── tools/
-    ├── register_ssh_hosts.py  # SSH 配置生成
-    ├── reset_network.sh       # macOS 网络重置
-    └── split_file.sh          # 文件分割
-```
-
 ## 环境要求
 
 - Python 3.6+
-- OpenSSH 客户端
 - macOS / Linux
 - 远程服务器需配置 SSH 密钥免密登录
 
